@@ -48,7 +48,7 @@ Python, Streamlit, LangChain, Sentence-Transformers (all-MiniLM-L6-v2), FAISS, B
 1. Extract text from each PDF page (pypdf)
 2. Split the text into overlapping chunks (800 characters, 100 overlap)
 3. Embed the chunks and store them in a FAISS vector index
-4. For each question, run hybrid retrieval: semantic search (top 8) and BM25 keyword search (top 4), then merge and remove duplicates
+4. For each question, run hybrid retrieval: semantic search (top 8) and BM25 keyword search (top 8), then merge and remove duplicates
 5. Send the retrieved chunks and the question to Gemini with a prompt that says "answer only from the context"
 6. Show the answer and the source pages (PDF page numbers)
 
