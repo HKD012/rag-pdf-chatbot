@@ -1,4 +1,5 @@
 import os
+import re
 
 from dotenv import load_dotenv
 from pypdf import PdfReader
@@ -15,7 +16,7 @@ load_dotenv()
 EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 CHUNK_SIZE = 800
 CHUNK_OVERLAP = 100
-TOP_K = 4
+TOP_K = 8
 
 PROMPT = ChatPromptTemplate.from_template(
     """You are a helpful banking assistant.
@@ -64,12 +65,31 @@ def get_llm():
         temperature = 0,
     )
 
-def answer_question(vectorstore: FAISS, question: str, llm=None):
-    """Retrieve the top-k chunks,build the prompt, ask the LLM. Returns (answer,sources)."""
-    retrieved = vectorstore.similarity_search(question, k=TOP_K)
-    context = "\n\n".join(
-        f"[Page {d.metadata['page']}] {d.page_content}" for d in retrieved)
-    chain = PROMPT | (llm or get_llm()) | StrOutputParser()
-    answer = chain.invoke({"context": context, "question": question})
+def keyword_search(vectorstore, question, k):
+    """Keyword (BM25) search: catches exact words like 'outstanding IDL' that embeddings miss."""
+    from rank_bm25 import BM25Okapi
 
+    docs = list(vectorstore.docstore._dict.values())
+    tokenize = lambda s: re.findall(r"\w+", s.lower())
+    bm25 = BM25Okapi([tokenize(d.page_content) for d in docs])
+    scores = bm25.get_scores(tokenize(question))
+    best = sorted(range(len(docs)), key=lambda i: -scores[i])[:k]
+    return [docs[i] for i in best]
+
+
+def answer_question(vectorstore: FAISS, question: str, llm=None):
+    """Hybrid retrieval: semantic top-k + keyword top-k, merged. Returns (answer, sources)."""
+    semantic = vectorstore.similarity_search(question, k=TOP_K)
+    keyword = keyword_search(vectorstore, question, TOP_K)
+    retrieved, seen = [], set()
+    for d in semantic + keyword:
+        key = (d.metadata["page"], d.page_content)
+        if key not in seen:
+            seen.add(key)
+            retrieved.append(d)
+    context = "\n\n".join(
+        f"[Page {d.metadata['page']}] {d.page_content}" for d in retrieved
+    )
+    chain = PROMPT | (llm or get_llm()) | StrOutputParser()
+    answer, = [chain.invoke({"context": context, "question": question})]
     return answer, retrieved
